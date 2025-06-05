@@ -183,6 +183,7 @@ function checkAlertConditions(prediction) {
   }
 }
 
+
 // Toca som de alerta
 function playAlertSound() {
   try {
