@@ -157,14 +157,28 @@ async function predictLoop() {
 // Verifica condições de alerta
 function checkAlertConditions(prediction) {
   const now = Date.now();
+  const confidenceValue = parseFloat(prediction.confidence); // Confiança em número
 
-  if (distance < 20 && prediction.className === "Pedestre") {
-    if (now - lastAlertTime > 500 || alertContainer.style.display === "none") {
-      alertContainer.style.display = "block";
-      lastAlertTime = now;
-      playAlertSound();
+  const isPedestrianWithFullConfidence = prediction.className === "Pedestre" && confidenceValue === 100.0;
+  const isCloseEnough = distance < 20;
+
+  if (isPedestrianWithFullConfidence && isCloseEnough) {
+    if (!isWaitingToShowAlert && alertContainer.style.display === "none") {
+      isWaitingToShowAlert = true;
+
+      alertTimeout = setTimeout(() => {
+        alertContainer.style.display = "block";
+        playAlertSound();
+        lastAlertTime = Date.now();
+        isWaitingToShowAlert = false;
+      }, 2000); // Espera 2 segundos antes de mostrar o alerta
     }
   } else {
+    if (alertTimeout) {
+      clearTimeout(alertTimeout);
+      alertTimeout = null;
+    }
+    isWaitingToShowAlert = false;
     alertContainer.style.display = "none";
   }
 }
