@@ -41,20 +41,29 @@ async function predict() {
       .resizeNearestNeighbor([96, 96])
       .mean(2)
       .toFloat()
-      .expandDims(2)
-      .expandDims(0);
+      .expandDims(2) // de [96,96] para [96,96,1]
+      .expandDims(0); // de [96,96,1] para [1,96,96,1]
 
-    return model.predict(tensor);
+    return model.predict(tensor); // isso retorna um tensor
   });
 
-  const predictions = await prediction.data();
-  prediction.dispose(); // libera o resultado final também
+  if (!prediction) {
+    return 'Erro: modelo não retornou nenhuma previsão';
+  }
+
+  const predictions = await prediction.data(); // Float32Array
+  prediction.dispose();
+
+  if (!predictions || predictions.length === 0 || isNaN(predictions[0])) {
+    return 'Erro: previsão inválida (NaN ou vazio)';
+  }
 
   const maxIndex = predictions.indexOf(Math.max(...predictions));
   const confidence = (predictions[maxIndex] * 100).toFixed(2);
 
-  return `Classe ${maxIndex + 1} - Confiança: ${confidence}%`;
+  return `Classe ${maxIndex} - Confiança: ${confidence}%`;
 }
+
 
 
 
