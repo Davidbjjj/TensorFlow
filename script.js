@@ -1,18 +1,32 @@
-let model, webcamElement, labels = ["Pedestre", "Sem Pedestre", "Carro"]; // Fallback manual
+let model, webcamElement, labels = ["Pedestre", "Sem Pedestre", "Carro"];
+let metadata = { grayscale: true }; // Valor padrão
+
+async function init() {
+  try {
+    // 1. Configura webcam
+    webcamElement = document.getElementById('webcam');
+    await setupWebcam();
+    
+    // 2. Carrega modelo e metadados
+    await loadModel();
+    
+    // 3. Inicia loop de predição
+    predictLoop();
+    
+    document.getElementById("result").textContent = "Modelo pronto!";
+  } catch (error) {
+    document.getElementById("result").textContent = `Erro: ${error.message}`;
+    console.error("Falha na inicialização:", error);
+  }
+}
 
 async function setupWebcam() {
-  webcamElement = document.getElementById('webcam');
-  
   if (!navigator.mediaDevices?.getUserMedia) {
-    alert("Seu navegador não suporta acesso à webcam ou não está em um servidor seguro (HTTPS/localhost).");
-    throw new Error("getUserMedia não suportado.");
+    throw new Error("Webcam não suportada");
   }
-
+  
   const stream = await navigator.mediaDevices.getUserMedia({ 
-    video: { 
-      width: 96, 
-      height: 96 
-    } 
+    video: { width: 96, height: 96 } 
   });
   webcamElement.srcObject = stream;
   
@@ -26,66 +40,53 @@ async function setupWebcam() {
 }
 
 async function loadModel() {
+  // 1. Carrega modelo
+  model = await tf.loadLayersModel("model/model.json");
+  
+  // 2. Tenta carregar metadados
   try {
-    // 1. Carrega o modelo
-    model = await tf.loadLayersModel("model/model.json");
-    
-    // 2. Tenta carregar metadados (opcional)
-    try {
-      const metadata = await fetch("model/metadata.json").then(r => r.json());
-      if (metadata.labels) labels = metadata.labels;
-    } catch (e) {
-      console.warn("Metadados não encontrados, usando labels padrão");
-    }
-    
-    console.log("Modelo carregado!", model);
-    console.log("Labels:", labels);
-  } catch (error) {
-    console.error("Falha ao carregar modelo:", error);
-    throw error;
+    metadata = await fetch("model/metadata.json").then(r => r.json());
+    if (metadata.labels) labels = metadata.labels;
+  } catch (e) {
+    console.warn("Metadados não encontrados, usando configuração padrão");
   }
+  
+  console.log("Modelo carregado. Configuração:", {
+    grayscale: metadata.grayscale,
+    labels: labels
+  });
 }
 
 async function predict() {
   const tensor = tf.tidy(() => {
-    // 1. Captura o frame e converte para float32
+    // 1. Captura frame (96x96)
     let tensor = tf.browser.fromPixels(webcamElement)
       .resizeNearestNeighbor([96, 96])
       .toFloat();
     
-    // 2. Converter para grayscale SE o modelo foi treinado assim
-    if (metadata && metadata.grayscale) {
+    // 2. Converte para grayscale se necessário
+    if (metadata.grayscale) {
       tensor = tensor.mean(2).expandDims(2);
     }
     
-    // 3. Normalização CRÍTICA (experimente ambas as versões)
-    // Versão A: Normalização padrão (para modelos treinados com pixels [0,1])
-    tensor = tensor.div(255.0);
+    // 3. Normalização (TESTE AMBAS OPÇÕES)
+    // Opção A (comente uma delas):
+    tensor = tensor.div(255.0); // Para modelos [0,1]
+    // Opção B:
+    // tensor = tensor.sub(127.5).div(127.5); // Para modelos [-1,1]
     
-    // Versão B: Normalização alternativa (se a Versão A não funcionar)
-    // tensor = tensor.sub(128).div(128);  // Para modelos que esperam [-1,1]
-    
-    // 4. Adiciona dimensão de batch
     return tensor.expandDims(0);
   });
-
-  // DEBUG: Verifique os valores finais
-  const [min, max] = await Promise.all([tensor.min().data(), tensor.max().data()]);
-  console.log('Tensor final - min:', min[0], 'max:', max[0], 'shape:', tensor.shape);
 
   try {
     const predictions = await model.predict(tensor).data();
     tensor.dispose();
     
-    console.log('Predições:', Array.from(predictions));
+    // Debug final
+    console.log("Predições:", Array.from(predictions));
     
-    // Se ainda der NaN, force valores válidos para debug
     if (predictions.some(isNaN)) {
-      console.warn('NaN detectado, substituindo por valores de debug');
-      return {
-        className: labels[0] || 'Debug',
-        confidence: '100.00'
-      };
+      throw new Error("Predições inválidas (NaN)");
     }
     
     const maxIndex = predictions.indexOf(Math.max(...predictions));
@@ -95,33 +96,24 @@ async function predict() {
     };
   } catch (error) {
     tensor.dispose();
-    console.error('Erro na predição:', error);
-    return {
-      className: 'Erro',
-      confidence: '0.00'
-    };
+    throw error;
   }
 }
+
 async function predictLoop() {
   while (true) {
-    const result = await predict();
-    document.getElementById("result").textContent = 
-      `${result.className} - Confiança: ${result.confidence}%`;
+    try {
+      const result = await predict();
+      document.getElementById("result").textContent = 
+        `${result.className} - ${result.confidence}%`;
+    } catch (error) {
+      console.error("Erro na predição:", error);
+      document.getElementById("result").textContent = 
+        "Erro na predição - verifique o console";
+    }
     await tf.nextFrame();
   }
 }
 
-async function main() {
-  try {
-    await setupWebcam();
-    await loadModel();
-    predictLoop();
-  } catch (error) {
-    document.getElementById("result").textContent = 
-      `Erro: ${error.message}`;
-    console.error("Falha na inicialização:", error);
-  }
-}
-
-// Inicia a aplicação
-main();
+// Inicia tudo quando a página carregar
+window.addEventListener('load', init);
