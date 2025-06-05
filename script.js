@@ -1,5 +1,5 @@
 // Variáveis globais
-let model;
+let model, webcamElement;
 let serialPort;
 let distance = 0;
 let labels = ["Pedestre", "Sem Pedestre", "Carro"];
@@ -18,12 +18,6 @@ const connectButton = document.getElementById("connect-arduino");
 const startButton = document.getElementById("start-classification");
 const alertContainer = document.getElementById("alert-container");
 
-// Remove a webcam do DOM (se existir)
-const webcamContainer = document.getElementById("webcam-container");
-if (webcamContainer) {
-  webcamContainer.remove();
-}
-
 // Event Listeners
 connectButton.addEventListener("click", connectToArduino);
 startButton.addEventListener("click", toggleClassification);
@@ -31,6 +25,8 @@ startButton.addEventListener("click", toggleClassification);
 // Função principal de inicialização
 async function init() {
   try {
+    webcamElement = document.getElementById("webcam");
+    await setupWebcam();
     await loadModel();
     startButton.disabled = false;
     resultElement.textContent = "Modelo carregado. Clique para iniciar.";
@@ -38,6 +34,22 @@ async function init() {
     console.error("Erro na inicialização:", error);
     resultElement.textContent = `Erro: ${error.message}`;
   }
+}
+
+// Configura a webcam
+async function setupWebcam() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("Webcam não suportada");
+    }
+
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .then(stream => {
+        webcamElement.srcObject = stream;
+        webcamElement.addEventListener("loadeddata", resolve);
+      })
+      .catch(reject);
+  });
 }
 
 // Carrega o modelo
@@ -55,7 +67,7 @@ async function loadModel() {
   console.log("Modelo carregado. Configuração:", metadata);
 }
 
-// Conexão com Arduino (mantido igual)
+// Conexão com Arduino
 async function connectToArduino() {
   try {
     serialPort = await navigator.serial.requestPort();
@@ -103,25 +115,45 @@ function updateDistanceDisplay() {
   distanceElement.textContent = `Distância: ${distance.toFixed(1)} cm`;
 }
 
-// Loop de classificação (simulado, sem webcam)
+// Classificação de imagem
+async function predict() {
+  const tensor = tf.tidy(() => {
+    let tensor = tf.browser.fromPixels(webcamElement)
+      .resizeNearestNeighbor([metadata.imageSize || 96, metadata.imageSize || 96])
+      .toFloat();
+
+    if (metadata.grayscale) {
+      tensor = tensor.mean(2).expandDims(2);
+    }
+
+    tensor = tensor.div(255.0);
+    return tensor.expandDims(0);
+  });
+
+  const predictions = await model.predict(tensor).data();
+  tensor.dispose();
+
+  const maxIndex = predictions.indexOf(Math.max(...predictions));
+  return {
+    className: labels[maxIndex] || `Classe ${maxIndex}`,
+    confidence: (predictions[maxIndex] * 100).toFixed(2)
+  };
+}
+
+// Loop de classificação
 async function predictLoop() {
   while (isPredicting) {
     try {
-      // Simulação de detecção (substitua pela sua lógica real)
-      const prediction = {
-        className: "Pedestre", // Simula detecção de pedestre
-        confidence: "95.00"   // Confiança fixa em 95% (para teste)
-      };
-      
-      resultElement.textContent = `${prediction.className} - ${distance.toFixed(1)}cm - Confiança: ${prediction.confidence}%`;
+      const prediction = await predict();
+      resultElement.textContent =
+        `${prediction.className} - ${distance.toFixed(1)}cm - Confiança: ${prediction.confidence}%`;
 
-      // Verifica se deve acionar o alerta
       checkAlertConditions(prediction);
     } catch (error) {
       console.error("Erro na predição:", error);
     }
 
-    await new Promise(resolve => setTimeout(resolve, 500)); // Verifica a cada 0.5s
+    await tf.nextFrame();
   }
 }
 
