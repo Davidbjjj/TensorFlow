@@ -6,6 +6,7 @@ let labels = ["Pedestre", "Sem Pedestre", "Carro"];
 let metadata = { grayscale: true };
 let isPredicting = false;
 let lastAlertTime = 0;
+let lineBuffer = "";
 
 // Elementos DOM
 const resultElement = document.getElementById("result");
@@ -51,7 +52,7 @@ async function setupWebcam() {
 // Carrega o modelo
 async function loadModel() {
   model = await tf.loadLayersModel("model/model.json");
-  
+
   try {
     const metadataResponse = await fetch("model/metadata.json");
     metadata = await metadataResponse.json();
@@ -59,7 +60,7 @@ async function loadModel() {
   } catch (e) {
     console.warn("Metadados não encontrados, usando padrão");
   }
-  
+
   console.log("Modelo carregado. Configuração:", metadata);
 }
 
@@ -68,25 +69,37 @@ async function connectToArduino() {
   try {
     serialPort = await navigator.serial.requestPort();
     await serialPort.open({ baudRate: 9600 });
-    
+
     connectButton.textContent = "Conectado";
     connectButton.style.backgroundColor = "#27ae60";
-    
-    const reader = serialPort.readable.getReader();
-    
+
+    const decoder = new TextDecoderStream();
+    const inputDone = serialPort.readable.pipeTo(decoder.writable);
+    const inputStream = decoder.readable;
+
+    const reader = inputStream.getReader();
+
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
-      
-      const text = new TextDecoder().decode(value);
-      try {
-        const data = JSON.parse(text);
-        distance = data.distance;
-        updateDistanceDisplay();
-      } catch (e) {
-        console.log("Dado recebido:", text.trim());
+
+      lineBuffer += value;
+
+      let lines = lineBuffer.split("\n");
+      lineBuffer = lines.pop(); // mantém linha incompleta no buffer
+
+      for (let line of lines) {
+        line = line.trim();
+        const match = line.match(/Distância: ([\d.]+) cm/);
+        if (match) {
+          distance = parseFloat(match[1]);
+          updateDistanceDisplay();
+        } else {
+          console.log("Dado ignorado:", line);
+        }
       }
     }
+
   } catch (error) {
     console.error("Erro na conexão serial:", error);
     connectButton.textContent = "Erro - Tentar novamente";
@@ -105,20 +118,18 @@ async function predict() {
     let tensor = tf.browser.fromPixels(webcamElement)
       .resizeNearestNeighbor([metadata.imageSize || 96, metadata.imageSize || 96])
       .toFloat();
-    
+
     if (metadata.grayscale) {
       tensor = tensor.mean(2).expandDims(2);
     }
-    
-    // Normalização (ajuste conforme necessário)
+
     tensor = tensor.div(255.0);
-    
     return tensor.expandDims(0);
   });
 
   const predictions = await model.predict(tensor).data();
   tensor.dispose();
-  
+
   const maxIndex = predictions.indexOf(Math.max(...predictions));
   return {
     className: labels[maxIndex] || `Classe ${maxIndex}`,
@@ -131,14 +142,14 @@ async function predictLoop() {
   while (isPredicting) {
     try {
       const prediction = await predict();
-      resultElement.textContent = 
+      resultElement.textContent =
         `${prediction.className} - ${distance.toFixed(1)}cm - Confiança: ${prediction.confidence}%`;
-      
+
       checkAlertConditions(prediction);
     } catch (error) {
       console.error("Erro na predição:", error);
     }
-    
+
     await tf.nextFrame();
   }
 }
@@ -146,7 +157,7 @@ async function predictLoop() {
 // Verifica condições de alerta
 function checkAlertConditions(prediction) {
   const now = Date.now();
-  
+
   if (distance < 20 && prediction.className === "Pedestre") {
     if (now - lastAlertTime > 500 || alertContainer.style.display === "none") {
       alertContainer.style.display = "block";
@@ -171,7 +182,7 @@ function playAlertSound() {
 // Controle da classificação
 function toggleClassification() {
   isPredicting = !isPredicting;
-  
+
   if (isPredicting) {
     startButton.textContent = "Parar Classificação";
     startButton.style.backgroundColor = "#e74c3c";
