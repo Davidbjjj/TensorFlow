@@ -33,23 +33,33 @@ async function predictLoop() {
 async function predict() {
   // Captura e pré-processamento
   const tensor = tf.tidy(() => {
-    return tf.browser.fromPixels(webcamElement)
-      .mean(2)                              // Converte para grayscale primeiro
-      .resizeNearestNeighbor([96, 96])      // Redimensiona para o tamanho do modelo
-      .toFloat()
-      .div(255.0)                          // Normaliza [0,1] (opcional, depende do modelo)
-      .expandDims(0)                        // Adiciona dimensão batch
-      .expandDims(-1);                      // Adiciona canal (grayscale)
+    // 1. Captura da webcam (já é rank 3: [height, width, 3] - RGB)
+    let tensor = tf.browser.fromPixels(webcamElement);
+    
+    // 2. Converte para escala de cinza (resulta em rank 2: [height, width])
+    tensor = tensor.mean(2);
+    
+    // 3. Adiciona dimensão de canal para ficar rank 3: [height, width, 1]
+    tensor = tensor.expandDims(2);
+    
+    // 4. Redimensiona para o tamanho esperado pelo modelo (96x96)
+    tensor = tensor.resizeNearestNeighbor([96, 96]);
+    
+    // 5. Converte para float e normaliza se necessário
+    tensor = tensor.toFloat().div(255.0);
+    
+    // 6. Adiciona dimensão de batch para ficar rank 4: [1, height, width, 1]
+    return tensor.expandDims(0);
   });
 
   // Predição
   const predictions = await model.predict(tensor).data();
-  tensor.dispose(); // Libera memória
+  tensor.dispose();
 
   // Processa resultados
   const maxIndex = predictions.indexOf(Math.max(...predictions));
   const confidence = (predictions[maxIndex] * 100).toFixed(2);
-  const classes = ["Pedestre", "Sem Pedestre", "Carro"]; // Do metadata.json
+  const classes = ["Pedestre", "Sem Pedestre", "Carro"];
   
   return {
     className: classes[maxIndex],
