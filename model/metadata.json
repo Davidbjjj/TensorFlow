@@ -1,1 +1,1 @@
-{"tfjsVersion":"1.7.4","tmVersion":"2.4.10","grayscale":true,"imageSize":96,"packageVersion":"0.8.4-alpha2","packageName":"@teachablemachine/image","timeStamp":"2025-06-04T23:40:08.811Z","userMetadata":{},"modelName":"pedreste","labels":["Pedestre","Sem Pedestre","Carro"]}
+{"tfjsVersion":"1.7.4","tmVersion":"2.4.10","grayscale":true,"imageSize":96,"packageVersion":"0.8.4-alpha2","packageName":"@teachablemachine/image","timeStamp":"2025-06-05T06:47:52.135Z","userMetadata":{},"modelName":"pedreste","labels":["Pedestre","Sem Pedestre"]}
