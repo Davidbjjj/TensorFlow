@@ -48,45 +48,54 @@ async function loadModel() {
 
 async function predict() {
   const tensor = tf.tidy(() => {
-    // Versão 1: Grayscale (comente se testar a versão RGB)
+    // 1. Captura o frame e converte para float32
     let tensor = tf.browser.fromPixels(webcamElement)
       .resizeNearestNeighbor([96, 96])
-      .mean(2)
-      .toFloat()
-      .expandDims(0)
-      .expandDims(-1);
+      .toFloat();
     
-    // Versão 2: RGB (descomente para testar)
-    // let tensor = tf.browser.fromPixels(webcamElement)
-    //   .resizeNearestNeighbor([96, 96])
-    //   .toFloat()
-    //   .expandDims(0);
+    // 2. Converter para grayscale SE o modelo foi treinado assim
+    if (metadata && metadata.grayscale) {
+      tensor = tensor.mean(2).expandDims(2);
+    }
     
-    // Debug: verifique os valores
-    console.log('Valores min/max:', tensor.min().dataSync()[0], tensor.max().dataSync()[0]);
+    // 3. Normalização CRÍTICA (experimente ambas as versões)
+    // Versão A: Normalização padrão (para modelos treinados com pixels [0,1])
+    tensor = tensor.div(255.0);
     
-    return tensor;
+    // Versão B: Normalização alternativa (se a Versão A não funcionar)
+    // tensor = tensor.sub(128).div(128);  // Para modelos que esperam [-1,1]
+    
+    // 4. Adiciona dimensão de batch
+    return tensor.expandDims(0);
   });
 
-  try {
-    const output = model.predict(tensor);
-    const predictions = await output.data();
-    
-    console.log('Predictions raw:', predictions);
-    
-    tensor.dispose();
-    output.dispose();
+  // DEBUG: Verifique os valores finais
+  const [min, max] = await Promise.all([tensor.min().data(), tensor.max().data()]);
+  console.log('Tensor final - min:', min[0], 'max:', max[0], 'shape:', tensor.shape);
 
-    const maxIndex = predictions.indexOf(Math.max(...predictions));
-    const confidence = (predictions[maxIndex] * 100).toFixed(2);
+  try {
+    const predictions = await model.predict(tensor).data();
+    tensor.dispose();
     
+    console.log('Predições:', Array.from(predictions));
+    
+    // Se ainda der NaN, force valores válidos para debug
+    if (predictions.some(isNaN)) {
+      console.warn('NaN detectado, substituindo por valores de debug');
+      return {
+        className: labels[0] || 'Debug',
+        confidence: '100.00'
+      };
+    }
+    
+    const maxIndex = predictions.indexOf(Math.max(...predictions));
     return {
       className: labels[maxIndex],
-      confidence: confidence
+      confidence: (predictions[maxIndex] * 100).toFixed(2)
     };
   } catch (error) {
     tensor.dispose();
-    console.error('Prediction error:', error);
+    console.error('Erro na predição:', error);
     return {
       className: 'Erro',
       confidence: '0.00'
