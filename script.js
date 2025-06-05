@@ -37,18 +37,20 @@ async function predictLoop() {
 
 async function predict() {
   const tensor = tf.browser.fromPixels(webcamElement)
-    .resizeNearestNeighbor([224, 224])
+    .resizeNearestNeighbor([96, 96])     // Redimensiona para 96x96
+    .mean(2)                              // Converte para escala de cinza
     .toFloat()
-    .expandDims();
+    .expandDims(2)                        // Adiciona canal (grayscale)
+    .expandDims(0);                       // Adiciona batch size
 
   const predictions = await model.predict(tensor).data();
 
-  // Pegando o índice da maior previsão
   const maxIndex = predictions.indexOf(Math.max(...predictions));
   const confidence = (predictions[maxIndex] * 100).toFixed(2);
 
   return `Classe ${maxIndex + 1} - Confiança: ${confidence}%`;
 }
+
 
 async function main() {
   await setupWebcam();
