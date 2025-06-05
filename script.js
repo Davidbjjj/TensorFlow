@@ -1,4 +1,4 @@
-let model, webcamElement, labels;
+let model, webcamElement, labels = ["Pedestre", "Sem Pedestre", "Carro"]; // Fallback manual
 
 async function setupWebcam() {
   webcamElement = document.getElementById('webcam');
@@ -8,42 +8,47 @@ async function setupWebcam() {
     throw new Error("getUserMedia não suportado.");
   }
 
-  const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+  const stream = await navigator.mediaDevices.getUserMedia({ 
+    video: { 
+      width: 96, 
+      height: 96 
+    } 
+  });
   webcamElement.srcObject = stream;
   
   return new Promise((resolve) => {
-    webcamElement.onloadedmetadata = resolve;
+    webcamElement.onloadedmetadata = () => {
+      webcamElement.width = 96;
+      webcamElement.height = 96;
+      resolve();
+    };
   });
 }
 
 async function loadModel() {
-  // Carrega o modelo e os metadados
-  model = await tf.loadLayersModel("model/model.json");
-  
-  // Carrega as labels do arquivo metadata.json
-  const metadata = await fetch("model/metadata.json").then(response => response.json());
-  labels = metadata.labels;
-  
-  console.log("Modelo carregado com sucesso!");
-  console.log("Labels disponíveis:", labels);
-}
-
-async function predictLoop() {
   try {
-    while (true) {
-      const prediction = await predict();
-      document.getElementById("result").innerHTML = 
-        `${prediction.className} - Confiança: ${prediction.confidence}%`;
-      await tf.nextFrame();
+    // 1. Carrega o modelo
+    model = await tf.loadLayersModel("model/model.json");
+    
+    // 2. Tenta carregar metadados (opcional)
+    try {
+      const metadata = await fetch("model/metadata.json").then(r => r.json());
+      if (metadata.labels) labels = metadata.labels;
+    } catch (e) {
+      console.warn("Metadados não encontrados, usando labels padrão");
     }
+    
+    console.log("Modelo carregado!", model);
+    console.log("Labels:", labels);
   } catch (error) {
-    console.error("Erro no predictLoop:", error);
+    console.error("Falha ao carregar modelo:", error);
+    throw error;
   }
 }
 
 async function predict() {
   const tensor = tf.tidy(() => {
-    // 1. Captura do frame (rank 3: [height, width, 3])
+    // 1. Captura o frame (rank 3: [height, width, 3])
     let tensor = tf.browser.fromPixels(webcamElement);
     
     // 2. Converte para grayscale (rank 2: [height, width])
@@ -55,28 +60,46 @@ async function predict() {
     // 4. Redimensiona para 96x96
     tensor = tensor.resizeNearestNeighbor([96, 96]);
     
-    // 5. Normalização (verifique se seu modelo foi treinado com dados normalizados)
+    // 5. Normalização (comente se não for usado no treino)
     tensor = tensor.div(255.0);
     
-    // 6. Adiciona dimensão de batch (rank 4: [1, height, width, 1])
+    // 6. Adiciona dimensão de batch (rank 4: [1, 96, 96, 1])
     return tensor.expandDims(0);
   });
 
   try {
-    const predictions = await model.predict(tensor).data();
+    // Faz a predição
+    const output = model.predict(tensor);
+    const predictions = await output.data();
+    output.dispose();
     tensor.dispose();
 
-    // Encontra a classe com maior probabilidade
+    console.log("Raw predictions:", Array.from(predictions)); // DEBUG
+    
+    // Processa resultados
     const maxIndex = predictions.indexOf(Math.max(...predictions));
     const confidence = (predictions[maxIndex] * 100).toFixed(2);
-
+    
     return {
-      className: labels ? labels[maxIndex] : `Classe ${maxIndex}`,
-      confidence: confidence
+      className: labels[maxIndex] || `Classe ${maxIndex}`,
+      confidence: isNaN(confidence) ? "0.00" : confidence
     };
   } catch (error) {
     tensor.dispose();
-    throw error;
+    console.error("Erro na predição:", error);
+    return {
+      className: "Erro",
+      confidence: "0.00"
+    };
+  }
+}
+
+async function predictLoop() {
+  while (true) {
+    const result = await predict();
+    document.getElementById("result").textContent = 
+      `${result.className} - Confiança: ${result.confidence}%`;
+    await tf.nextFrame();
   }
 }
 
@@ -86,8 +109,9 @@ async function main() {
     await loadModel();
     predictLoop();
   } catch (error) {
-    console.error("Erro na inicialização:", error);
-    alert(`Erro: ${error.message}`);
+    document.getElementById("result").textContent = 
+      `Erro: ${error.message}`;
+    console.error("Falha na inicialização:", error);
   }
 }
 
