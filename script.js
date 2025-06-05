@@ -48,52 +48,51 @@ async function loadModel() {
 
 async function predict() {
   const tensor = tf.tidy(() => {
-    // 1. Captura o frame (rank 3: [height, width, 3])
-    let tensor = tf.browser.fromPixels(webcamElement);
+    // Versão 1: Grayscale (comente se testar a versão RGB)
+    let tensor = tf.browser.fromPixels(webcamElement)
+      .resizeNearestNeighbor([96, 96])
+      .mean(2)
+      .toFloat()
+      .expandDims(0)
+      .expandDims(-1);
     
-    // 2. Converte para grayscale (rank 2: [height, width])
-    tensor = tensor.mean(2);
+    // Versão 2: RGB (descomente para testar)
+    // let tensor = tf.browser.fromPixels(webcamElement)
+    //   .resizeNearestNeighbor([96, 96])
+    //   .toFloat()
+    //   .expandDims(0);
     
-    // 3. Adiciona canal (rank 3: [height, width, 1])
-    tensor = tensor.expandDims(2);
+    // Debug: verifique os valores
+    console.log('Valores min/max:', tensor.min().dataSync()[0], tensor.max().dataSync()[0]);
     
-    // 4. Redimensiona para 96x96
-    tensor = tensor.resizeNearestNeighbor([96, 96]);
-    
-    // 5. Normalização (comente se não for usado no treino)
-    tensor = tensor.div(255.0);
-    
-    // 6. Adiciona dimensão de batch (rank 4: [1, 96, 96, 1])
-    return tensor.expandDims(0);
+    return tensor;
   });
 
   try {
-    // Faz a predição
     const output = model.predict(tensor);
     const predictions = await output.data();
-    output.dispose();
-    tensor.dispose();
-
-    console.log("Raw predictions:", Array.from(predictions)); // DEBUG
     
-    // Processa resultados
+    console.log('Predictions raw:', predictions);
+    
+    tensor.dispose();
+    output.dispose();
+
     const maxIndex = predictions.indexOf(Math.max(...predictions));
     const confidence = (predictions[maxIndex] * 100).toFixed(2);
     
     return {
-      className: labels[maxIndex] || `Classe ${maxIndex}`,
-      confidence: isNaN(confidence) ? "0.00" : confidence
+      className: labels[maxIndex],
+      confidence: confidence
     };
   } catch (error) {
     tensor.dispose();
-    console.error("Erro na predição:", error);
+    console.error('Prediction error:', error);
     return {
-      className: "Erro",
-      confidence: "0.00"
+      className: 'Erro',
+      confidence: '0.00'
     };
   }
 }
-
 async function predictLoop() {
   while (true) {
     const result = await predict();
