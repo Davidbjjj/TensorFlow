@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Reconhecimento com Webcam - Teachable Machine</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.18.0/dist/tf.min.js"></script>
+    <style>
+        #status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .loading { background-color: #fff3cd; color: #856404; }
+        .success { background-color: #d4edda; color: #155724; }
+        .error { background-color: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <div>
+        <h1>Reconhecimento com Webcam</h1>
+        <p>Posicione o objeto na frente da câmera para identificação</p>
+        <div>
+            <video id="webcam" width="640" height="480" autoplay playsinline></video>
+        </div>
+        <div>
+            <button id="startButton" disabled>Iniciar Webcam</button>
+            <button id="stopButton" disabled>Parar Webcam</button>
+        </div>
+        <div id="predictionResults">
+            <h2>Resultados:</h2>
+            <ul id="resultsList"></ul>
+        </div>
+        <div id="status" class="loading">Status: Carregando TensorFlow.js...</div>
+    </div>
+
+    <script>
+        // Variáveis globais
+        let model;
+        const webcamElement = document.getElementById('webcam');
+        const startButton = document.getElementById('startButton');
+        const stopButton = document.getElementById('stopButton');
+        const resultsList = document.getElementById('resultsList');
+        const statusElement = document.getElementById('status');
+        let webcamStream;
+        let isPredicting = false;
+
+        // Atualizar status
+        function updateStatus(message, type = 'loading') {
+            statusElement.textContent = `Status: ${message}`;
+            statusElement.className = type;
+        }
+
+        // Carregar o modelo com tratamento de erros melhorado
+        async function loadModel() {
+            try {
+                updateStatus('Carregando modelo...', 'loading');
+                
+                // Verifica se o TensorFlow.js está carregado
+                if (!tf || !tf.loadLayersModel) {
+                    throw new Error('TensorFlow.js não carregado corretamente');
+                }
+                
+                // Tenta carregar o modelo
+                model = await tf.loadLayersModel('model.json');
+                
+                updateStatus('Modelo carregado com sucesso!', 'success');
+                console.log('Modelo carregado:', model);
+                
+                // Habilita o botão de iniciar
+                startButton.disabled = false;
+                
+                return true;
+            } catch (error) {
+                console.error('Erro ao carregar modelo:', error);
+                updateStatus(`Erro ao carregar modelo: ${error.message}`, 'error');
+                return false;
+            }
+        }
+
+        // Iniciar webcam
+        async function startWebcam() {
+            try {
+                updateStatus('Solicitando acesso à webcam...', 'loading');
+                
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    throw new Error('Webcam não suportada ou contexto inseguro (use HTTPS ou localhost)');
+                }
+                
+                webcamStream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 640, height: 480 },
+                    audio: false
+                });
+                
+                webcamElement.srcObject = webcamStream;
+                
+                // Espera a webcam estar pronta
+                await new Promise((resolve) => {
+                    webcamElement.onloadedmetadata = () => {
+                        webcamElement.play();
+                        resolve();
+                    };
+                });
+                
+                updateStatus('Webcam ativada com sucesso!', 'success');
+                return true;
+            } catch (error) {
+                console.error('Erro ao acessar webcam:', error);
+                updateStatus(`Erro na webcam: ${error.message}`, 'error');
+                return false;
+            }
+        }
+
+        // Fazer previsões
+        async function predict() {
+            if (!model) {
+                updateStatus('Modelo não carregado!', 'error');
+                return;
+            }
+            
+            isPredicting = true;
+            updateStatus('Fazendo previsões...', 'loading');
+            
+            try {
+                while (isPredicting) {
+                    // Captura o frame da webcam
+                    const imageTensor = tf.browser.fromPixels(webcamElement);
+                    
+                    // Pré-processamento (ajuste conforme seu modelo)
+                    const inputTensor = tf.image.resizeBilinear(imageTensor, [224, 224]);
+                    const batchedTensor = inputTensor.expandDims(0);
+                    const normalizedTensor = batchedTensor.toFloat().div(127).sub(1);
+                    
+                    // Faz a previsão
+                    const predictions = await model.predict(normalizedTensor).data();
+                    
+                    // Limpeza
+                    imageTensor.dispose();
+                    inputTensor.dispose();
+                    batchedTensor.dispose();
+                    normalizedTensor.dispose();
+                    
+                    // Exibe resultados
+                    displayResults(predictions);
+                    
+                    // Espera o próximo frame
+                    await tf.nextFrame();
+                }
+            } catch (error) {
+                console.error('Erro durante previsão:', error);
+                updateStatus(`Erro na previsão: ${error.message}`, 'error');
+                isPredicting = false;
+            }
+        }
+
+        // Exibir resultados
+        function displayResults(predictions) {
+            resultsList.innerHTML = '';
+            
+            // Substitua com os nomes das suas classes
+            const classes = ['Classe 1', 'Classe 2', 'Classe 3'];
+            
+            classes.forEach((className, index) => {
+                const percentage = (predictions[index] * 100).toFixed(2);
+                const li = document.createElement('li');
+                li.textContent = `${className}: ${percentage}%`;
+                resultsList.appendChild(li);
+            });
+        }
+
+        // Event listeners
+        startButton.addEventListener('click', async () => {
+            startButton.disabled = true;
+            const webcamStarted = await startWebcam();
+            
+            if (webcamStarted) {
+                stopButton.disabled = false;
+                await predict();
+            } else {
+                startButton.disabled = false;
+            }
+        });
+
+        stopButton.addEventListener('click', () => {
+            isPredicting = false;
+            stopButton.disabled = true;
+            startButton.disabled = false;
+            
+            if (webcamStream) {
+                webcamStream.getTracks().forEach(track => track.stop());
+                webcamElement.srcObject = null;
+                updateStatus('Webcam desativada', 'loading');
+            }
+        });
+
+        // Inicialização
+        async function init() {
+            try {
+                // Verifica se TensorFlow.js está carregado
+                if (!tf || !tf.ready) {
+                    await tf.ready();
+                }
+                
+                updateStatus('TensorFlow.js carregado, carregando modelo...', 'loading');
+                await loadModel();
+            } catch (error) {
+                console.error('Erro na inicialização:', error);
+                updateStatus(`Erro inicial: ${error.message}`, 'error');
+            }
+        }
+
+        // Inicia quando a página carrega
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>
