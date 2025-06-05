@@ -38,3 +38,4 @@ async function predict() {
 }
 
 init();
+ 
