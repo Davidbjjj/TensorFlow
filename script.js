@@ -36,20 +36,26 @@ async function predictLoop() {
 }
 
 async function predict() {
-  const tensor = tf.browser.fromPixels(webcamElement)
-    .resizeNearestNeighbor([96, 96])     // Redimensiona para 96x96
-    .mean(2)                              // Converte para escala de cinza
-    .toFloat()
-    .expandDims(2)                        // Adiciona canal (grayscale)
-    .expandDims(0);                       // Adiciona batch size
+  const prediction = tf.tidy(() => {
+    const tensor = tf.browser.fromPixels(webcamElement)
+      .resizeNearestNeighbor([96, 96])
+      .mean(2)
+      .toFloat()
+      .expandDims(2)
+      .expandDims(0);
 
-  const predictions = await model.predict(tensor).data();
+    return model.predict(tensor);
+  });
+
+  const predictions = await prediction.data();
+  prediction.dispose(); // libera o resultado final também
 
   const maxIndex = predictions.indexOf(Math.max(...predictions));
   const confidence = (predictions[maxIndex] * 100).toFixed(2);
 
   return `Classe ${maxIndex + 1} - Confiança: ${confidence}%`;
 }
+
 
 
 async function main() {
