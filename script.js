@@ -1,119 +1,188 @@
-let model, webcamElement, labels = ["Pedestre", "Sem Pedestre", "Carro"];
-let metadata = { grayscale: true }; // Valor padrão
+// Variáveis globais
+let model, webcamElement;
+let serialPort;
+let distance = 0;
+let labels = ["Pedestre", "Sem Pedestre", "Carro"];
+let metadata = { grayscale: true };
+let isPredicting = false;
+let lastAlertTime = 0;
 
+// Elementos DOM
+const resultElement = document.getElementById("result");
+const distanceElement = document.getElementById("distance-display");
+const connectButton = document.getElementById("connect-arduino");
+const startButton = document.getElementById("start-classification");
+const alertContainer = document.getElementById("alert-container");
+
+// Event Listeners
+connectButton.addEventListener("click", connectToArduino);
+startButton.addEventListener("click", toggleClassification);
+
+// Função principal de inicialização
 async function init() {
   try {
-    // 1. Configura webcam
-    webcamElement = document.getElementById('webcam');
+    webcamElement = document.getElementById("webcam");
     await setupWebcam();
-    
-    // 2. Carrega modelo e metadados
     await loadModel();
-    
-    // 3. Inicia loop de predição
-    predictLoop();
-    
-    document.getElementById("result").textContent = "Modelo pronto!";
+    startButton.disabled = false;
+    resultElement.textContent = "Modelo carregado. Clique para iniciar.";
   } catch (error) {
-    document.getElementById("result").textContent = `Erro: ${error.message}`;
-    console.error("Falha na inicialização:", error);
+    console.error("Erro na inicialização:", error);
+    resultElement.textContent = `Erro: ${error.message}`;
   }
 }
 
+// Configura a webcam
 async function setupWebcam() {
-  if (!navigator.mediaDevices?.getUserMedia) {
-    throw new Error("Webcam não suportada");
-  }
-  
-  const stream = await navigator.mediaDevices.getUserMedia({ 
-    video: { width: 96, height: 96 } 
-  });
-  webcamElement.srcObject = stream;
-  
-  return new Promise((resolve) => {
-    webcamElement.onloadedmetadata = () => {
-      webcamElement.width = 96;
-      webcamElement.height = 96;
-      resolve();
-    };
+  return new Promise((resolve, reject) => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("Webcam não suportada");
+    }
+
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .then(stream => {
+        webcamElement.srcObject = stream;
+        webcamElement.addEventListener("loadeddata", resolve);
+      })
+      .catch(reject);
   });
 }
 
+// Carrega o modelo
 async function loadModel() {
-  // 1. Carrega modelo
   model = await tf.loadLayersModel("model/model.json");
   
-  // 2. Tenta carregar metadados
   try {
-    metadata = await fetch("model/metadata.json").then(r => r.json());
+    const metadataResponse = await fetch("model/metadata.json");
+    metadata = await metadataResponse.json();
     if (metadata.labels) labels = metadata.labels;
   } catch (e) {
-    console.warn("Metadados não encontrados, usando configuração padrão");
+    console.warn("Metadados não encontrados, usando padrão");
   }
   
-  console.log("Modelo carregado. Configuração:", {
-    grayscale: metadata.grayscale,
-    labels: labels
-  });
+  console.log("Modelo carregado. Configuração:", metadata);
 }
 
+// Conexão com Arduino
+async function connectToArduino() {
+  try {
+    serialPort = await navigator.serial.requestPort();
+    await serialPort.open({ baudRate: 9600 });
+    
+    connectButton.textContent = "Conectado";
+    connectButton.style.backgroundColor = "#27ae60";
+    
+    const reader = serialPort.readable.getReader();
+    
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      
+      const text = new TextDecoder().decode(value);
+      try {
+        const data = JSON.parse(text);
+        distance = data.distance;
+        updateDistanceDisplay();
+      } catch (e) {
+        console.log("Dado recebido:", text.trim());
+      }
+    }
+  } catch (error) {
+    console.error("Erro na conexão serial:", error);
+    connectButton.textContent = "Erro - Tentar novamente";
+    connectButton.style.backgroundColor = "#e74c3c";
+  }
+}
+
+// Atualiza display da distância
+function updateDistanceDisplay() {
+  distanceElement.textContent = `Distância: ${distance.toFixed(1)} cm`;
+}
+
+// Classificação de imagem
 async function predict() {
   const tensor = tf.tidy(() => {
-    // 1. Captura frame (96x96)
     let tensor = tf.browser.fromPixels(webcamElement)
-      .resizeNearestNeighbor([96, 96])
+      .resizeNearestNeighbor([metadata.imageSize || 96, metadata.imageSize || 96])
       .toFloat();
     
-    // 2. Converte para grayscale se necessário
     if (metadata.grayscale) {
       tensor = tensor.mean(2).expandDims(2);
     }
     
-    // 3. Normalização (TESTE AMBAS OPÇÕES)
-    // Opção A (comente uma delas):
-    tensor = tensor.div(255.0); // Para modelos [0,1]
-    // Opção B:
-    // tensor = tensor.sub(127.5).div(127.5); // Para modelos [-1,1]
+    // Normalização (ajuste conforme necessário)
+    tensor = tensor.div(255.0);
     
     return tensor.expandDims(0);
   });
 
-  try {
-    const predictions = await model.predict(tensor).data();
-    tensor.dispose();
-    
-    // Debug final
-    console.log("Predições:", Array.from(predictions));
-    
-    if (predictions.some(isNaN)) {
-      throw new Error("Predições inválidas (NaN)");
-    }
-    
-    const maxIndex = predictions.indexOf(Math.max(...predictions));
-    return {
-      className: labels[maxIndex],
-      confidence: (predictions[maxIndex] * 100).toFixed(2)
-    };
-  } catch (error) {
-    tensor.dispose();
-    throw error;
-  }
+  const predictions = await model.predict(tensor).data();
+  tensor.dispose();
+  
+  const maxIndex = predictions.indexOf(Math.max(...predictions));
+  return {
+    className: labels[maxIndex] || `Classe ${maxIndex}`,
+    confidence: (predictions[maxIndex] * 100).toFixed(2)
+  };
 }
 
+// Loop de classificação
 async function predictLoop() {
-  while (true) {
+  while (isPredicting) {
     try {
-      const result = await predict();
-      document.getElementById("result").textContent = 
-        `${result.className} - ${result.confidence}%`;
+      const prediction = await predict();
+      resultElement.textContent = 
+        `${prediction.className} - ${distance.toFixed(1)}cm - Confiança: ${prediction.confidence}%`;
+      
+      checkAlertConditions(prediction);
     } catch (error) {
       console.error("Erro na predição:", error);
-      document.getElementById("result").textContent = 
-        "Erro na predição - verifique o console";
     }
+    
     await tf.nextFrame();
   }
 }
 
-// Inicia tudo quando a página carregar
+// Verifica condições de alerta
+function checkAlertConditions(prediction) {
+  const now = Date.now();
+  
+  if (distance < 20 && prediction.className === "Pedestre") {
+    if (now - lastAlertTime > 500 || alertContainer.style.display === "none") {
+      alertContainer.style.display = "block";
+      lastAlertTime = now;
+      playAlertSound();
+    }
+  } else {
+    alertContainer.style.display = "none";
+  }
+}
+
+// Toca som de alerta
+function playAlertSound() {
+  try {
+    const audio = new Audio('alert.mp3');
+    audio.play().catch(e => console.log("Erro no áudio:", e));
+  } catch (e) {
+    console.log("Não foi possível reproduzir som:", e);
+  }
+}
+
+// Controle da classificação
+function toggleClassification() {
+  isPredicting = !isPredicting;
+  
+  if (isPredicting) {
+    startButton.textContent = "Parar Classificação";
+    startButton.style.backgroundColor = "#e74c3c";
+    predictLoop();
+  } else {
+    startButton.textContent = "Iniciar Classificação";
+    startButton.style.backgroundColor = "#2c3e50";
+    resultElement.textContent = "Classificação pausada";
+    alertContainer.style.display = "none";
+  }
+}
+
+// Inicia o sistema quando a página carrega
 window.addEventListener('load', init);
