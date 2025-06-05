@@ -159,7 +159,7 @@ function checkAlertConditions(prediction) {
   const now = Date.now();
   const confidenceValue = parseFloat(prediction.confidence); // Confiança em número
 
-  const isPedestrianWithFullConfidence = prediction.className === "Pedestre" && confidenceValue === 100.0;
+  const isPedestrianWithFullConfidence = prediction.className === "Pedestre" && confidenceValue === 90.0;
   const isCloseEnough = distance < 20;
 
   if (isPedestrianWithFullConfidence && isCloseEnough) {
