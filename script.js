@@ -7,6 +7,11 @@ let metadata = { grayscale: true };
 let isPredicting = false;
 let lastAlertTime = 0;
 let lineBuffer = "";
+// Adicione estas variáveis no início, junto com as outras variáveis globais
+let alertTimeout = null;
+let isWaitingToShowAlert = false;
+
+// O restante do código permanece o mesmo
 
 // Elementos DOM
 const resultElement = document.getElementById("result");
