@@ -1,15 +1,30 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8">
-  <title>Classificador com Webcam</title>
-</head>
-<body>
-  <h1>Classificador com Teachable Machine + Webcam</h1>
-  <video id="webcam" autoplay playsinline width="224" height="224"></video>
-  <div id="result"></div>
+<html lang="pt-br">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Classificador com Teachable Machine + Webcam</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        text-align: center;
+        padding: 20px;
+      }
+      #webcam-container {
+        margin: 20px auto;
+      }
+      #label-container div {
+        margin-top: 10px;
+        font-size: 18px;
+      }
+    </style>
+    <!-- Biblioteca do Teachable Machine -->
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image"></script>
+  </head>
+  <body>
+    <h1>Classificador com Teachable Machine + Webcam</h1>
+    <div id="webcam-container"></div>
+    <div id="label-container"></div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-  <script src="script.js"></script>
-</body>
+    <script src="script.js"></script>
+  </body>
 </html>

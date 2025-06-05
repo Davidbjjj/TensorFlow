@@ -1,76 +1,43 @@
-let model, webcamElement;
+const URL = "model/"; // Caminho onde está seu model.json e metadata.json
+let model, webcam, labelContainer, maxPredictions;
 
-async function setupWebcam() {
-  webcamElement = document.getElementById('webcam');
+async function init() {
+  const modelURL = URL + "model.json";
+  const metadataURL = URL + "metadata.json";
 
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    alert("Seu navegador não suporta acesso à webcam ou não está em um servidor seguro.");
-    throw new Error("getUserMedia não suportado.");
+  // Carrega o modelo e o metadata
+  model = await tmImage.load(modelURL, metadataURL);
+  maxPredictions = model.getTotalClasses();
+
+  // Configura webcam
+  const flip = true; // espelha a imagem horizontalmente
+  webcam = new tmImage.Webcam(200, 200, flip);
+  await webcam.setup(); // pede permissão da câmera
+  await webcam.play();
+  window.requestAnimationFrame(loop);
+
+  document.getElementById("webcam-container").appendChild(webcam.canvas);
+
+  labelContainer = document.getElementById("label-container");
+  for (let i = 0; i < maxPredictions; i++) {
+    labelContainer.appendChild(document.createElement("div"));
   }
-
-  return new Promise((resolve, reject) => {
-    navigator.mediaDevices.getUserMedia({ video: true })
-      .then(stream => {
-        webcamElement.srcObject = stream;
-        webcamElement.addEventListener("loadeddata", resolve);
-      })
-      .catch(err => {
-        alert("Erro ao acessar a webcam: " + err);
-        reject(err);
-      });
-  });
 }
 
-
-async function loadModel() {
-  model = await tf.loadLayersModel("model/model.json");
-  console.log("Modelo carregado!");
-}
-
-async function predictLoop() {
-  while (true) {
-    const prediction = await predict();
-    document.getElementById("result").innerHTML = prediction;
-    await tf.nextFrame(); // aguarda próximo frame de vídeo
-  }
+async function loop() {
+  webcam.update(); // atualiza a imagem da webcam
+  await predict();
+  window.requestAnimationFrame(loop);
 }
 
 async function predict() {
-  const prediction = tf.tidy(() => {
-    const tensor = tf.browser.fromPixels(webcamElement)
-      .resizeNearestNeighbor([96, 96])
-      .mean(2)
-      .toFloat()
-      .expandDims(2) // de [96,96] para [96,96,1]
-      .expandDims(0); // de [96,96,1] para [1,96,96,1]
-
-    return model.predict(tensor); // isso retorna um tensor
-  });
-
-  if (!prediction) {
-    return 'Erro: modelo não retornou nenhuma previsão';
+  const prediction = await model.predict(webcam.canvas);
+  for (let i = 0; i < maxPredictions; i++) {
+    const classPrediction =
+      prediction[i].className + ": " + (prediction[i].probability * 100).toFixed(2) + "%";
+    labelContainer.childNodes[i].innerText = classPrediction;
   }
-
-  const predictions = await prediction.data(); // Float32Array
-  prediction.dispose();
-
-  if (!predictions || predictions.length === 0 || isNaN(predictions[0])) {
-    return 'Erro: previsão inválida (NaN ou vazio)';
-  }
-
-  const maxIndex = predictions.indexOf(Math.max(...predictions));
-  const confidence = (predictions[maxIndex] * 100).toFixed(2);
-
-  return `Classe ${maxIndex} - Confiança: ${confidence}%`;
 }
 
-
-
-
-async function main() {
-  await setupWebcam();
-  await loadModel();
-  predictLoop();
-}
-
-main();
+// Inicia o app
+init();
