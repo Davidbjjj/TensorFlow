@@ -1,18 +1,16 @@
-const URL = "model/"; // Caminho onde está seu model.json e metadata.json
+const URL = "model/"; // Ajuste para o caminho do seu modelo
 let model, webcam, labelContainer, maxPredictions;
 
 async function init() {
   const modelURL = URL + "model.json";
   const metadataURL = URL + "metadata.json";
 
-  // Carrega o modelo e o metadata
   model = await tmImage.load(modelURL, metadataURL);
   maxPredictions = model.getTotalClasses();
 
-  // Configura webcam
-  const flip = true; // espelha a imagem horizontalmente
+  const flip = true;
   webcam = new tmImage.Webcam(200, 200, flip);
-  await webcam.setup(); // pede permissão da câmera
+  await webcam.setup();
   await webcam.play();
   window.requestAnimationFrame(loop);
 
@@ -25,7 +23,7 @@ async function init() {
 }
 
 async function loop() {
-  webcam.update(); // atualiza a imagem da webcam
+  webcam.update();
   await predict();
   window.requestAnimationFrame(loop);
 }
@@ -39,5 +37,4 @@ async function predict() {
   }
 }
 
-// Inicia o app
 init();
